@@ -2,7 +2,7 @@
 use crate::ExpressionTriple;
 use crate::dataset::ExpressionTerm;
 use md5::{Digest, Md5};
-use oxiri::Iri;
+use oxiri::{Iri, IriRef};
 use oxrdf::vocab::{rdf, xsd};
 #[cfg(feature = "sparql-12")]
 use oxrdf::{BaseDirection, NamedOrBlankNode};
@@ -592,13 +592,15 @@ pub fn build_expression_evaluator<'a, C: ExpressionEvaluatorContext<'a>>(
                 Rc::new(move |tuple| {
                     Some(ExpressionTerm::NamedNode(match e(tuple)? {
                         ExpressionTerm::NamedNode(iri) => iri,
-                        ExpressionTerm::StringLiteral(iri) => if let Some(base_iri) = &base_iri {
-                            base_iri.resolve(&iri)
-                        } else {
-                            Iri::parse(iri)
+                        // oxiri 0.3: absolute IRIs are not resolved (upstream d14ac0b5c)
+                        ExpressionTerm::StringLiteral(iri) => {
+                            let iri = IriRef::parse(iri).ok()?;
+                            if iri.is_absolute() {
+                                NamedNode::new_unchecked(iri.into_inner())
+                            } else {
+                                base_iri.as_ref()?.resolve(&iri).ok()?.into()
+                            }
                         }
-                        .ok()?
-                        .into(),
                         _ => return None,
                     }))
                 })

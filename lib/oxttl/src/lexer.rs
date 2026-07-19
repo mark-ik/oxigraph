@@ -3,7 +3,7 @@
 use crate::toolkit::{TokenRecognizer, TokenRecognizerError};
 use memchr::{memchr, memchr2};
 use oxilangtag::LanguageTag;
-use oxiri::Iri;
+use oxiri::{Iri, IriRef};
 #[cfg(feature = "rdf-12")]
 use oxrdf::BaseDirection;
 use oxrdf::NamedNode;
@@ -239,24 +239,34 @@ impl N3Lexer {
         options: &N3LexerOptions,
     ) -> Result<N3Token<'static>, TokenRecognizerError> {
         let iri = string_from_utf8(iri, position.clone())?;
-        Ok(N3Token::IriRef(
-            if let Some(base_iri) = options.base_iri.as_ref() {
-                if self.lenient {
-                    base_iri.resolve_unchecked(&iri)
-                } else {
-                    base_iri
-                        .resolve(&iri)
-                        .map_err(|e| (position, e.to_string()))?
-                }
-                .into_inner()
-            } else if self.lenient {
-                iri
+        // oxiri 0.3: resolution takes an IriRef and absolute IRIs are not resolved (upstream d14ac0b5c)
+        if self.lenient {
+            let Some(base_iri) = options.base_iri.as_ref() else {
+                return Ok(N3Token::IriRef(iri));
+            };
+            let iri = IriRef::parse_unchecked(iri);
+            Ok(N3Token::IriRef(if iri.is_absolute() {
+                iri.into_inner()
             } else {
-                Iri::parse(iri)
+                base_iri.resolve_unchecked(&iri).into_inner()
+            }))
+        } else {
+            let iri = IriRef::parse(iri).map_err(|e| (position.clone(), e.to_string()))?;
+            Ok(N3Token::IriRef(if iri.is_absolute() {
+                iri.into_inner()
+            } else if let Some(base_iri) = options.base_iri.as_ref() {
+                base_iri
+                    .resolve(&iri)
                     .map_err(|e| (position, e.to_string()))?
                     .into_inner()
-            },
-        ))
+            } else {
+                return Err((
+                    position,
+                    format!("{iri} is a relative IRI even if no @base is set"),
+                )
+                    .into());
+            }))
+        }
     }
 
     fn recognize_pname_or_keyword<'a>(

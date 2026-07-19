@@ -5,7 +5,7 @@ use crate::query::*;
 use crate::term::*;
 use crate::update::*;
 use oxilangtag::LanguageTag;
-use oxiri::{Iri, IriParseError};
+use oxiri::{Iri, IriParseError, IriRef};
 use oxrdf::vocab::{rdf, xsd};
 use peg::parser;
 use peg::str::LineCol;
@@ -958,10 +958,14 @@ impl ParserState {
     }
 
     fn parse_iri(&self, iri: String) -> Result<Iri<String>, IriParseError> {
-        if let Some(base_iri) = &self.base_iri {
+        // oxiri 0.3: resolution takes an IriRef and absolute IRIs are not resolved (upstream d14ac0b5c)
+        let iri = IriRef::parse(iri)?;
+        if iri.is_absolute() {
+            Ok(Iri::parse_unchecked(iri.into_inner()))
+        } else if let Some(base_iri) = &self.base_iri {
             base_iri.resolve(&iri)
         } else {
-            Iri::parse(iri)
+            Iri::parse(iri.into_inner())
         }
     }
 

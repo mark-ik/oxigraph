@@ -1,7 +1,7 @@
 use crate::error::{JsonLdErrorCode, JsonLdSyntaxError};
 use crate::{JsonLdProcessingMode, JsonLdProfile, JsonLdProfileSet};
 use json_event_parser::{JsonEvent, JsonSyntaxError, SliceJsonParser};
-use oxiri::Iri;
+use oxiri::{Iri, IriRef};
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::error::Error;
@@ -156,17 +156,14 @@ impl JsonLdContextProcessor {
                 // 5.2)
                 JsonNode::String(context) => {
                     // 5.2.1)
-                    let context = match if let Some(base_url) = base_url {
-                        base_url.resolve(&context)
-                    } else {
-                        Iri::parse(context.clone())
-                    } {
+                    let context = match self.resolve_iri(
+                        &context,
+                        base_url,
+                        JsonLdErrorCode::LoadingDocumentFailed,
+                    ) {
                         Ok(url) => url.into_inner(),
                         Err(e) => {
-                            errors.push(JsonLdSyntaxError::msg_and_code(
-                                format!("Invalid remote context URL '{context}': {e}"),
-                                JsonLdErrorCode::LoadingDocumentFailed,
-                            ));
+                            errors.push(e);
                             continue;
                         }
                     };
@@ -266,7 +263,7 @@ impl JsonLdContextProcessor {
                 };
                 // 5.6.3)
                 let import = match if let Some(base_url) = base_url {
-                    base_url.resolve(&import)
+                    IriRef::parse(import.as_str()).and_then(|import| base_url.resolve(&import))
                 } else {
                     Iri::parse(import.clone())
                 } {
@@ -318,24 +315,13 @@ impl JsonLdContextProcessor {
                         }
                         // 5.7.3) and 5.7.4)
                         JsonNode::String(value) => {
-                            if self.lenient {
-                                result.base_iri = Some(if let Some(base_iri) = &result.base_iri {
-                                    base_iri.resolve_unchecked(&value)
-                                } else {
-                                    Iri::parse_unchecked(value.clone())
-                                })
-                            } else {
-                                match if let Some(base_iri) = &result.base_iri {
-                                    base_iri.resolve(&value)
-                                } else {
-                                    Iri::parse(value.clone())
-                                } {
-                                    Ok(iri) => result.base_iri = Some(iri),
-                                    Err(e) => errors.push(JsonLdSyntaxError::msg_and_code(
-                                        format!("Invalid @base '{value}': {e}"),
-                                        JsonLdErrorCode::InvalidBaseIri,
-                                    )),
-                                }
+                            match self.resolve_iri(
+                                &value,
+                                result.base_iri.as_ref(),
+                                JsonLdErrorCode::InvalidBaseIri,
+                            ) {
+                                Ok(base_iri) => result.base_iri = Some(base_iri),
+                                Err(e) => errors.push(e),
                             }
                         }
                         _ => errors.push(JsonLdSyntaxError::msg_and_code(
@@ -900,17 +886,10 @@ impl JsonLdContextProcessor {
             }
         } else if term.contains('/') {
             // 16)
-            let iri = match if let Some(base_url) = base_url {
-                base_url.resolve(term)
-            } else {
-                Iri::parse(term.to_owned())
-            } {
+            let iri = match self.resolve_iri(term, base_url, JsonLdErrorCode::InvalidIriMapping) {
                 Ok(iri) => iri.into_inner(),
                 Err(e) => {
-                    errors.push(JsonLdSyntaxError::msg_and_code(
-                        format!("Invalid term relative IRI '{term}': {e}"),
-                        JsonLdErrorCode::InvalidIriMapping,
-                    ));
+                    errors.push(e);
                     return;
                 }
             };
@@ -1364,15 +1343,52 @@ impl JsonLdContextProcessor {
         // 8)
         if document_relative {
             if let Some(base_iri) = &active_context.base_iri {
-                if self.lenient {
-                    return Some(base_iri.resolve_unchecked(&value).into_inner().into());
-                } else if let Ok(value) = base_iri.resolve(&value) {
-                    return Some(base_iri.resolve_unchecked(&value).into_inner().into());
+                if let Ok(result) =
+                    self.resolve_iri(&value, Some(base_iri), JsonLdErrorCode::InvalidBaseIri)
+                {
+                    return Some(result.into_inner().into());
                 }
             }
         }
 
         Some(value)
+    }
+
+    // oxiri 0.3: resolution takes an IriRef and absolute IRIs are not resolved
+    // (mirrors upstream `resolve_iri` after d14ac0b5c and 79554fa05, on 0.5's String types)
+    fn resolve_iri(
+        &self,
+        iri: &str,
+        base_iri: Option<&Iri<String>>,
+        error_code: JsonLdErrorCode,
+    ) -> Result<Iri<String>, JsonLdSyntaxError> {
+        Ok(if self.lenient {
+            let iri = IriRef::parse_unchecked(iri);
+            if iri.is_absolute() {
+                Iri::parse_unchecked(iri.into_inner().to_owned())
+            } else if let Some(base_iri) = base_iri {
+                base_iri.resolve_unchecked(&iri)
+            } else {
+                // hack to not fail
+                Iri::parse_unchecked(iri.into_inner().to_owned())
+            }
+        } else {
+            let iri = IriRef::parse(iri).map_err(|e| {
+                JsonLdSyntaxError::msg_and_code(format!("Invalid URL '{iri}': {e}"), error_code)
+            })?;
+            if iri.is_absolute() {
+                Iri::parse_unchecked(iri.into_inner().to_owned())
+            } else if let Some(base_iri) = base_iri {
+                base_iri.resolve(&iri).map_err(|e| {
+                    JsonLdSyntaxError::msg_and_code(format!("Invalid URL '{iri}': {e}"), error_code)
+                })?
+            } else {
+                return Err(JsonLdSyntaxError::msg_and_code(
+                    format!("No base found to resolve relative URL '{iri}'"),
+                    error_code,
+                ));
+            }
+        })
     }
 
     fn load_remote_context(

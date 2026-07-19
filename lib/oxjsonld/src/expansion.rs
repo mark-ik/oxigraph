@@ -6,7 +6,7 @@ use crate::error::JsonLdErrorCode;
 use crate::profile::JsonLdProcessingMode;
 use crate::{JsonLdSyntaxError, MAX_CONTEXT_RECURSION};
 use json_event_parser::JsonEvent;
-use oxiri::Iri;
+use oxiri::{Iri, IriRef};
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::error::Error;
@@ -2735,11 +2735,21 @@ impl JsonLdExpansionConverter {
         }
         // 8)
         if document_relative {
-            if let Some(base_iri) = &active_context.base_iri {
-                if self.lenient {
-                    return Some(base_iri.resolve_unchecked(&value).into_inner().into());
-                } else if let Ok(value) = base_iri.resolve(&value) {
-                    return Some(base_iri.resolve_unchecked(&value).into_inner().into());
+            // oxiri 0.3: resolution takes an IriRef and absolute IRIs are not resolved (upstream d14ac0b5c)
+            if self.lenient {
+                let Some(base_iri) = &active_context.base_iri else {
+                    return Some(value);
+                };
+                let iri = IriRef::parse_unchecked(value.as_ref());
+                return Some(base_iri.resolve_unchecked(&iri).into_inner().into());
+            } else if let Ok(iri) = IriRef::parse(value.as_ref()) {
+                if iri.is_absolute() {
+                    return Some(value);
+                }
+                if let Some(base_iri) = &active_context.base_iri {
+                    if let Ok(iri) = base_iri.resolve(&iri) {
+                        return Some(iri.into_inner().into());
+                    }
                 }
             }
         }

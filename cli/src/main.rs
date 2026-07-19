@@ -19,7 +19,7 @@ use oxigraph::model::{
 use oxigraph::sparql::results::{QueryResultsFormat, QueryResultsSerializer};
 use oxigraph::sparql::{CancellationToken, QueryResults, SparqlEvaluator};
 use oxigraph::store::{BulkLoader, LoaderError, Store, Transaction};
-use oxiri::Iri;
+use oxiri::{Iri, IriRef};
 use rand::random;
 use rayon_core::ThreadPoolBuilder;
 #[cfg(feature = "geosparql")]
@@ -1270,11 +1270,16 @@ fn base_url(request: &Request<Body>) -> String {
 }
 
 fn resolve_with_base(request: &Request<Body>, url: &str) -> Result<NamedNode, HttpError> {
-    Ok(Iri::parse(base_url(request))
-        .map_err(bad_request)?
-        .resolve(url)
-        .map_err(bad_request)?
-        .into())
+    let iri = IriRef::parse(url).map_err(bad_request)?;
+    Ok(if iri.is_absolute() {
+        NamedNode::new_unchecked(iri.into_inner())
+    } else {
+        Iri::parse(base_url(request))
+            .map_err(bad_request)?
+            .resolve(&iri)
+            .map_err(bad_request)?
+            .into()
+    })
 }
 
 struct RequestParams {
