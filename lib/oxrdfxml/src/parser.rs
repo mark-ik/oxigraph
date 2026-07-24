@@ -952,25 +952,6 @@ impl<R> InternalRdfXmlParser<R> {
             for attr in event.attributes() {
                 clean_event.push_attribute(attr.map_err(Error::InvalidAttr)?);
             }
-            if self.in_literal_depth == 0 {
-                for (prefix, namespace) in self.reader.resolver().bindings() {
-                    let namespace = namespace.into_inner();
-                    if let Err(error) = Iri::parse(namespace.as_ref()) {
-                        return Err(RdfXmlSyntaxError::invalid_iri(namespace.into(), error).into());
-                    }
-                    match prefix {
-                        PrefixDeclaration::Default => {
-                            clean_event.push_attribute(("xmlns", namespace))
-                        }
-                        PrefixDeclaration::Named(name) => {
-                            let mut attr = String::with_capacity(6 + name.len());
-                            attr.push_str("xmlns:");
-                            attr.push_str(name);
-                            clean_event.push_attribute((attr.as_str(), namespace))
-                        }
-                    }
-                }
-            }
             writer.write_event(Event::Start(clean_event))?;
             self.in_literal_depth += 1;
             return Ok(());
