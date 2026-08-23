@@ -12,7 +12,7 @@ use quick_xml::events::*;
 use quick_xml::name::{
     LocalName, Namespace, NamespaceBindingsIter, PrefixDeclaration, ResolveResult,
 };
-use quick_xml::{Decoder, Error, NsReader, Writer, XmlVersion};
+use quick_xml::{Error, NsReader, Writer, XmlVersion};
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 use std::io::{BufReader, Read};
@@ -318,7 +318,6 @@ impl<R: Read> ReaderRdfXmlParser<R> {
     pub fn prefixes(&self) -> RdfXmlPrefixesIter<'_> {
         RdfXmlPrefixesIter {
             inner: self.parser.reader.resolver().bindings(),
-            decoder: self.parser.reader.decoder(),
             lenient: self.parser.lenient,
         }
     }
@@ -457,7 +456,6 @@ impl<R: AsyncRead + Unpin> TokioAsyncReaderRdfXmlParser<R> {
     pub fn prefixes(&self) -> RdfXmlPrefixesIter<'_> {
         RdfXmlPrefixesIter {
             inner: self.parser.reader.resolver().bindings(),
-            decoder: self.parser.reader.decoder(),
             lenient: self.parser.lenient,
         }
     }
@@ -594,7 +592,6 @@ impl SliceRdfXmlParser<'_> {
     pub fn prefixes(&self) -> RdfXmlPrefixesIter<'_> {
         RdfXmlPrefixesIter {
             inner: self.parser.reader.resolver().bindings(),
-            decoder: self.parser.reader.decoder(),
             lenient: self.parser.lenient,
         }
     }
@@ -638,7 +635,6 @@ impl SliceRdfXmlParser<'_> {
 /// See [`ReaderRdfXmlParser::prefixes`].
 pub struct RdfXmlPrefixesIter<'a> {
     inner: NamespaceBindingsIter<'a>,
-    decoder: Decoder,
     lenient: bool,
 }
 
@@ -653,9 +649,6 @@ impl<'a> Iterator for RdfXmlPrefixesIter<'a> {
                 match key {
                     PrefixDeclaration::Default => "",
                     PrefixDeclaration::Named(name) => {
-                        let Ok(Cow::Borrowed(name)) = self.decoder.decode(name) else {
-                            continue;
-                        };
                         let Ok(Cow::Borrowed(name)) = unescape_with(name, |_| None) else {
                             continue;
                         };
@@ -666,10 +659,7 @@ impl<'a> Iterator for RdfXmlPrefixesIter<'a> {
                     }
                 },
                 {
-                    let Ok(Cow::Borrowed(value)) = self.decoder.decode(value.0) else {
-                        continue;
-                    };
-                    let Ok(Cow::Borrowed(value)) = unescape_with(value, |_| None) else {
+                    let Ok(Cow::Borrowed(value)) = unescape_with(value.into_inner(), |_| None) else {
                         continue;
                     };
                     if !self.lenient && Iri::parse(value).is_err() {
@@ -862,7 +852,7 @@ impl<R> InternalRdfXmlParser<R> {
             Event::Text(event) => {
                 self.text_buffer
                     .get_or_insert_default()
-                    .push_str(&event.xml_content(self.xml_version)?);
+                    .push_str(&event.xml_content(self.xml_version));
                 Ok(())
             }
             Event::GeneralRef(event) => {
@@ -872,7 +862,7 @@ impl<R> InternalRdfXmlParser<R> {
             Event::CData(event) => {
                 self.text_buffer
                     .get_or_insert_default()
-                    .push_str(&event.xml_content(self.xml_version)?);
+                    .push_str(&event.xml_content(self.xml_version));
                 Ok(())
             }
             Event::Comment(_) | Event::PI(_) => Ok(()),
@@ -901,7 +891,7 @@ impl<R> InternalRdfXmlParser<R> {
 
     fn parse_doctype(&mut self, dt: &BytesText<'_>) -> Result<(), RdfXmlParseError> {
         // we extract entities
-        for input in dt.xml_content(self.xml_version)?.split('<').skip(1) {
+        for input in dt.xml_content(self.xml_version).split('<').skip(1) {
             if let Some(input) = input.strip_prefix("!ENTITY") {
                 let input = input.trim_start().strip_prefix('%').unwrap_or(input);
                 let (entity_name, input) = input.trim_start().split_once(|c: char| c.is_ascii_whitespace()).ok_or_else(|| {
@@ -958,30 +948,25 @@ impl<R> InternalRdfXmlParser<R> {
         // Literal case
         if let Some(RdfXmlState::ParseTypeLiteralPropertyElt { writer, .. }) = self.state.last_mut()
         {
-            let mut clean_event = BytesStart::new(
-                self.reader
-                    .decoder()
-                    .decode(event.name().as_ref())?
-                    .to_string(),
-            );
+            let mut clean_event = BytesStart::new(event.name().into_inner().to_owned());
             for attr in event.attributes() {
                 clean_event.push_attribute(attr.map_err(Error::InvalidAttr)?);
             }
             if self.in_literal_depth == 0 {
                 for (prefix, namespace) in self.reader.resolver().bindings() {
-                    let namespace = self.reader.decoder().decode(namespace.into_inner())?;
+                    let namespace = namespace.into_inner();
                     if let Err(error) = Iri::parse(namespace.as_ref()) {
                         return Err(RdfXmlSyntaxError::invalid_iri(namespace.into(), error).into());
                     }
                     match prefix {
                         PrefixDeclaration::Default => {
-                            clean_event.push_attribute(("xmlns".as_bytes(), namespace.as_bytes()))
+                            clean_event.push_attribute(("xmlns", namespace))
                         }
                         PrefixDeclaration::Named(name) => {
-                            let mut attr = Vec::with_capacity(6 + name.len());
-                            attr.extend_from_slice(b"xmlns:");
-                            attr.extend_from_slice(name);
-                            clean_event.push_attribute((attr.as_slice(), namespace.as_bytes()))
+                            let mut attr = String::with_capacity(6 + name.len());
+                            attr.push_str("xmlns:");
+                            attr.push_str(name);
+                            clean_event.push_attribute((attr.as_str(), namespace))
                         }
                     }
                 }
@@ -1019,10 +1004,10 @@ impl<R> InternalRdfXmlParser<R> {
             let (attribute_namespace, attribute_local_name) =
                 self.reader.resolver().resolve_attribute(attribute.key);
             if attribute_namespace
-                == ResolveResult::Bound(Namespace(b"http://www.w3.org/XML/1998/namespace"))
+                == ResolveResult::Bound(Namespace("http://www.w3.org/XML/1998/namespace"))
             {
-                match attribute.key.local_name().as_ref() {
-                    b"lang" => {
+                match attribute.key.local_name().into_inner() {
+                    "lang" => {
                         let tag = self.convert_attribute(&attribute)?.to_ascii_lowercase();
                         language = Some(if self.lenient {
                             tag
@@ -1034,7 +1019,7 @@ impl<R> InternalRdfXmlParser<R> {
                                 .into_inner()
                         });
                     }
-                    b"base" => {
+                    "base" => {
                         let iri = self.convert_attribute(&attribute)?;
                         base_iri = Some(if self.lenient {
                             Iri::parse_unchecked(iri.into_owned())
@@ -1046,12 +1031,12 @@ impl<R> InternalRdfXmlParser<R> {
                     }
                     _ => (), // We ignore other xml attributes
                 }
-            } else if attribute.key.as_ref().starts_with(b"xml") {
+            } else if attribute.key.into_inner().starts_with("xml") {
                 // We ignore other xml attributes
             } else if cfg!(feature = "rdf-12")
                 && attribute_namespace
-                    == ResolveResult::Bound(Namespace(b"http://www.w3.org/2005/11/its"))
-                && attribute.key.local_name().as_ref() == b"dir"
+                    == ResolveResult::Bound(Namespace("http://www.w3.org/2005/11/its"))
+                && attribute.key.local_name().into_inner() == "dir"
             {
                 #[cfg(feature = "rdf-12")]
                 {
@@ -1059,8 +1044,8 @@ impl<R> InternalRdfXmlParser<R> {
                 }
             } else if cfg!(feature = "rdf-12")
                 && attribute_namespace
-                    == ResolveResult::Bound(Namespace(b"http://www.w3.org/2005/11/its"))
-                && attribute.key.local_name().as_ref() == b"version"
+                    == ResolveResult::Bound(Namespace("http://www.w3.org/2005/11/its"))
+                && attribute.key.local_name().into_inner() == "version"
             {
                 // We ignore its:version
             } else {
@@ -1488,9 +1473,7 @@ impl<R> InternalRdfXmlParser<R> {
             else {
                 unreachable!()
             };
-            writer.write_event(Event::End(BytesEnd::new(
-                self.reader.decoder().decode(event.name().as_ref())?,
-            )))?;
+            writer.write_event(Event::End(BytesEnd::new(event.name().into_inner())))?;
             self.in_literal_depth -= 1;
             return Ok(());
         }
@@ -1539,23 +1522,23 @@ impl<R> InternalRdfXmlParser<R> {
     ) -> Result<String, RdfXmlParseError> {
         match namespace {
             ResolveResult::Bound(ns) => {
-                let mut value = Vec::with_capacity(ns.as_ref().len() + local_name.as_ref().len());
-                value.extend_from_slice(ns.as_ref());
-                value.extend_from_slice(local_name.as_ref());
-                Ok(unescape_with(&self.reader.decoder().decode(&value)?, |e| {
-                    self.custom_entities.resolve(e)
-                })
-                .map_err(Error::from)?
-                .to_string())
+                let mut value = String::with_capacity(
+                    ns.into_inner().len() + local_name.into_inner().len(),
+                );
+                value.push_str(ns.into_inner());
+                value.push_str(local_name.into_inner());
+                Ok(
+                    unescape_with(&value, |e| self.custom_entities.resolve(e))
+                        .map_err(Error::from)?
+                        .to_string(),
+                )
             }
             ResolveResult::Unbound => {
                 Err(RdfXmlSyntaxError::msg("XML namespaces are required in RDF/XML").into())
             }
-            ResolveResult::Unknown(v) => Err(RdfXmlSyntaxError::msg(format!(
-                "Unknown prefix {}:",
-                self.reader.decoder().decode(&v)?
-            ))
-            .into()),
+            ResolveResult::Unknown(v) => {
+                Err(RdfXmlSyntaxError::msg(format!("Unknown prefix {v}:")).into())
+            }
         }
     }
 
@@ -1969,12 +1952,11 @@ impl<R> InternalRdfXmlParser<R> {
         &self,
         attribute: &Attribute<'a>,
     ) -> Result<Cow<'a, str>, RdfXmlParseError> {
-        Ok(attribute.decoded_and_normalized_value_with(
-            self.xml_version,
-            self.reader.decoder(),
-            MAX_ENTITY_NESTING,
-            |e| self.custom_entities.resolve(e),
-        )?)
+        Ok(
+            attribute.normalized_value_with(self.xml_version, MAX_ENTITY_NESTING, |e| {
+                self.custom_entities.resolve(e)
+            })?,
+        )
     }
 
     fn convert_iri_attribute(
@@ -2119,7 +2101,7 @@ impl<R> InternalRdfXmlParser<R> {
             self.text_buffer.get_or_insert_default().push(char_ref);
             return Ok(());
         }
-        let reference = event.xml_content(self.xml_version)?;
+        let reference = event.xml_content(self.xml_version);
         let Some(value) = self.custom_entities.resolve(&reference) else {
             return Err(EscapeError::UnrecognizedEntity(0..event.len(), reference.into()).into());
         };
@@ -2149,15 +2131,15 @@ fn is_whitespace(c: u8) -> bool {
     matches!(c, b' ' | b'\t' | b'\n' | b'\r')
 }
 
-fn is_utf8(encoding: &[u8]) -> bool {
+fn is_utf8(encoding: &str) -> bool {
     matches!(
-        encoding.to_ascii_lowercase().as_slice(),
-        b"unicode-1-1-utf-8"
-            | b"unicode11utf8"
-            | b"unicode20utf8"
-            | b"utf-8"
-            | b"utf8"
-            | b"x-unicode20utf8"
+        encoding.to_ascii_lowercase().as_str(),
+        "unicode-1-1-utf-8"
+            | "unicode11utf8"
+            | "unicode20utf8"
+            | "utf-8"
+            | "utf8"
+            | "x-unicode20utf8"
     )
 }
 

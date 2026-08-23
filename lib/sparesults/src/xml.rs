@@ -8,7 +8,7 @@ use oxrdf::*;
 use quick_xml::escape::{EscapeError, escape, resolve_xml_entity};
 use quick_xml::events::{BytesDecl, BytesEnd, BytesRef, BytesStart, BytesText, Event};
 use quick_xml::reader::Config;
-use quick_xml::{Decoder, Error, Reader, Writer, XmlVersion};
+use quick_xml::{Error, Reader, Writer, XmlVersion};
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::io::{self, BufReader, Read, Write};
@@ -253,7 +253,6 @@ impl<R: Read> ReaderXmlQueryResultsParserOutput<R> {
         let mut inner = XmlInnerQueryResultsParser {
             state: ResultsState::Start,
             variables: Vec::new(),
-            decoder: reader.decoder(),
             text_buffer: String::new(),
             xml_version: XmlVersion::Implicit1_0,
         };
@@ -319,7 +318,6 @@ impl<R: AsyncRead + Unpin> TokioAsyncReaderXmlQueryResultsParserOutput<R> {
         let mut inner = XmlInnerQueryResultsParser {
             state: ResultsState::Start,
             variables: Vec::new(),
-            decoder: reader.decoder(),
             text_buffer: String::new(),
             xml_version: XmlVersion::Implicit1_0,
         };
@@ -399,7 +397,6 @@ impl<'a> SliceXmlQueryResultsParserOutput<'a> {
         let mut inner = XmlInnerQueryResultsParser {
             state: ResultsState::Start,
             variables: Vec::new(),
-            decoder: reader.decoder(),
             text_buffer: String::new(),
             xml_version: XmlVersion::Implicit1_0,
         };
@@ -476,7 +473,6 @@ enum ResultsState {
 struct XmlInnerQueryResultsParser {
     state: ResultsState,
     variables: Vec<Variable>,
-    decoder: Decoder,
     text_buffer: String,
     xml_version: XmlVersion,
 }
@@ -493,28 +489,28 @@ impl XmlInnerQueryResultsParser {
         match event {
             Event::Start(event) => match self.state {
                 ResultsState::Start => {
-                    if event.local_name().as_ref() == b"sparql" {
+                    if event.local_name().into_inner() == "sparql" {
                         self.state = ResultsState::Sparql;
                         Ok(None)
                     } else {
-                        Err(QueryResultsSyntaxError::msg(format!("Expecting <sparql> tag, found <{}>", self.decoder.decode(event.name().as_ref())?)).into())
+                        Err(QueryResultsSyntaxError::msg(format!("Expecting <sparql> tag, found <{}>", event.name().into_inner())).into())
                     }
                 }
                 ResultsState::Sparql => {
-                    if event.local_name().as_ref() == b"head" {
+                    if event.local_name().into_inner() == "head" {
                         self.state = ResultsState::Head;
                         Ok(None)
                     } else {
-                        Err(QueryResultsSyntaxError::msg(format!("Expecting <head> tag, found <{}>", self.decoder.decode(event.name().as_ref())?)).into())
+                        Err(QueryResultsSyntaxError::msg(format!("Expecting <head> tag, found <{}>", event.name().into_inner())).into())
                     }
                 }
                 ResultsState::Head => {
-                    if event.local_name().as_ref() == b"variable" {
+                    if event.local_name().into_inner() == "variable" {
                         let name = event.attributes()
                             .filter_map(Result::ok)
-                            .find(|attr| attr.key.local_name().as_ref() == b"name")
+                            .find(|attr| attr.key.local_name().into_inner() == "name")
                             .ok_or_else(|| QueryResultsSyntaxError::msg("No name attribute found for the <variable> tag"))?;
-                        let name = name.decoded_and_normalized_value(self.xml_version, self.decoder)?;
+                        let name = name.normalized_value(self.xml_version)?;
                         let variable = Variable::new(name).map_err(|e| QueryResultsSyntaxError::msg(format!("Invalid variable name: {e}")))?;
                         if self.variables.contains(&variable) {
                             return Err(QueryResultsSyntaxError::msg(format!(
@@ -524,18 +520,18 @@ impl XmlInnerQueryResultsParser {
                         }
                         self.variables.push(variable);
                         Ok(None)
-                    } else if event.local_name().as_ref() == b"link" {
+                    } else if event.local_name().into_inner() == "link" {
                         // no op
                         Ok(None)
                     } else {
-                        Err(QueryResultsSyntaxError::msg(format!("Expecting <variable> or <link> tag, found <{}>", self.decoder.decode(event.name().as_ref())?)).into())
+                        Err(QueryResultsSyntaxError::msg(format!("Expecting <variable> or <link> tag, found <{}>", event.name().into_inner())).into())
                     }
                 }
                 ResultsState::AfterHead => {
-                    if event.local_name().as_ref() == b"boolean" {
+                    if event.local_name().into_inner() == "boolean" {
                         self.state = ResultsState::Boolean;
                         Ok(None)
-                    } else if event.local_name().as_ref() == b"results" {
+                    } else if event.local_name().into_inner() == "results" {
                         let mut mapping = HashMap::new();
                         for (i, var) in self.variables.iter().enumerate() {
                             mapping.insert(var.clone().into_string(), i);
@@ -543,7 +539,6 @@ impl XmlInnerQueryResultsParser {
                         Ok(Some(XmlInnerQueryResults::Solutions {
                             variables: take(&mut self.variables),
                             solutions: XmlInnerSolutionsParser {
-                                decoder: self.decoder,
                                 mapping,
                                 state_stack: vec![State::Start, State::Start],
                                 new_bindings: Vec::new(),
@@ -560,16 +555,16 @@ impl XmlInnerQueryResultsParser {
                                 xml_version: self.xml_version,
                             },
                         }))
-                    } else if event.local_name().as_ref() != b"link" && event.local_name().as_ref() != b"results" && event.local_name().as_ref() != b"boolean" {
-                        Err(QueryResultsSyntaxError::msg(format!("Expecting sparql tag, found <{}>", self.decoder.decode(event.name().as_ref())?)).into())
+                    } else if event.local_name().into_inner() != "link" && event.local_name().into_inner() != "results" && event.local_name().into_inner() != "boolean" {
+                        Err(QueryResultsSyntaxError::msg(format!("Expecting sparql tag, found <{}>", event.name().into_inner())).into())
                     } else {
                         Ok(None)
                     }
                 }
-                ResultsState::Boolean => Err(QueryResultsSyntaxError::msg(format!("Unexpected tag inside of <boolean> tag: <{}>", self.decoder.decode(event.name().as_ref())?)).into())
+                ResultsState::Boolean => Err(QueryResultsSyntaxError::msg(format!("Unexpected tag inside of <boolean> tag: <{}>", event.name().into_inner())).into())
             },
             Event::Text(event) => {
-                self.text_buffer.push_str(&event.xml_content(self.xml_version)?);
+                self.text_buffer.push_str(&event.xml_content(self.xml_version));
                 Ok(None)
             }
             Event::GeneralRef(event) => {
@@ -590,7 +585,7 @@ impl XmlInnerQueryResultsParser {
                         }
                     }
                     ResultsState::Head => {
-                        if event.local_name().as_ref() == b"head" {
+                        if event.local_name().into_inner() == "head" {
                             self.state = ResultsState::AfterHead;
                         }
                         Ok(None)
@@ -635,7 +630,6 @@ enum State {
 }
 
 struct XmlInnerSolutionsParser {
-    decoder: Decoder,
     mapping: HashMap<String, usize>,
     state_stack: Vec<State>,
     new_bindings: Vec<Option<Term>>,
@@ -662,24 +656,24 @@ impl XmlInnerSolutionsParser {
                 QueryResultsSyntaxError::msg("Extra XML is not allowed at the end of the document")
             })? {
                 State::Start => {
-                    if event.local_name().as_ref() == b"result" {
+                    if event.local_name().into_inner() == "result" {
                         self.new_bindings = vec![None; self.mapping.len()];
                         self.state_stack.push(State::Result);
                         Ok(None)
                     } else {
                         Err(QueryResultsSyntaxError::msg(format!(
                             "Expecting <result>, found <{}>",
-                            self.decoder.decode(event.name().as_ref())?
+                            event.name().into_inner()
                         ))
                         .into())
                     }
                 }
                 State::Result => {
-                    if event.local_name().as_ref() == b"binding" {
+                    if event.local_name().into_inner() == "binding" {
                         let Some(attr) = event
                             .attributes()
                             .filter_map(Result::ok)
-                            .find(|attr| attr.key.local_name().as_ref() == b"name")
+                            .find(|attr| attr.key.local_name().into_inner() == "name")
                         else {
                             return Err(QueryResultsSyntaxError::msg(
                                 "No name attribute found for the <binding> tag",
@@ -687,7 +681,7 @@ impl XmlInnerSolutionsParser {
                             .into());
                         };
                         self.current_var = Some(
-                            attr.decoded_and_normalized_value(self.xml_version, self.decoder)?
+                            attr.normalized_value(self.xml_version)?
                                 .into_owned(),
                         );
                         self.state_stack.push(State::Binding);
@@ -695,7 +689,7 @@ impl XmlInnerSolutionsParser {
                     } else {
                         Err(QueryResultsSyntaxError::msg(format!(
                             "Expecting <binding>, found <{}>",
-                            self.decoder.decode(event.name().as_ref())?
+                            event.name().into_inner()
                         ))
                         .into())
                     }
@@ -707,26 +701,23 @@ impl XmlInnerSolutionsParser {
                         )
                         .into());
                     }
-                    if event.local_name().as_ref() == b"uri" {
+                    if event.local_name().into_inner() == "uri" {
                         self.state_stack.push(State::Uri);
                         Ok(None)
-                    } else if event.local_name().as_ref() == b"bnode" {
+                    } else if event.local_name().into_inner() == "bnode" {
                         self.state_stack.push(State::BNode);
                         Ok(None)
-                    } else if event.local_name().as_ref() == b"literal" {
+                    } else if event.local_name().into_inner() == "literal" {
                         for attr in event.attributes() {
                             let attr = attr.map_err(Error::from)?;
-                            if attr.key.as_ref() == b"xml:lang" {
+                            if attr.key.into_inner() == "xml:lang" {
                                 self.lang = Some(
-                                    attr.decoded_and_normalized_value(
-                                        self.xml_version,
-                                        self.decoder,
-                                    )?
+                                    attr.normalized_value(self.xml_version)?
                                     .into_owned(),
                                 );
-                            } else if attr.key.local_name().as_ref() == b"datatype" {
+                            } else if attr.key.local_name().into_inner() == "datatype" {
                                 let iri = attr
-                                    .decoded_and_normalized_value(self.xml_version, self.decoder)?;
+                                    .normalized_value(self.xml_version)?;
                                 self.datatype =
                                     Some(NamedNode::new(iri.as_ref()).map_err(|e| {
                                         QueryResultsSyntaxError::msg(format!(
@@ -735,66 +726,63 @@ impl XmlInnerSolutionsParser {
                                     })?);
                             }
                             #[cfg(feature = "sparql-12")]
-                            if attr.key.as_ref() == b"its:dir" {
+                            if attr.key.into_inner() == "its:dir" {
                                 self.direction = Some(
-                                    attr.decoded_and_normalized_value(
-                                        self.xml_version,
-                                        self.decoder,
-                                    )?
+                                    attr.normalized_value(self.xml_version)?
                                     .into_owned(),
                                 );
                             }
                         }
                         self.state_stack.push(State::Literal);
                         Ok(None)
-                    } else if event.local_name().as_ref() == b"triple" {
+                    } else if event.local_name().into_inner() == "triple" {
                         self.state_stack.push(State::Triple);
                         Ok(None)
                     } else {
                         Err(QueryResultsSyntaxError::msg(format!(
                             "Expecting <uri>, <bnode> or <literal> found <{}>",
-                            self.decoder.decode(event.name().as_ref())?
+                            event.name().into_inner()
                         ))
                         .into())
                     }
                 }
                 State::Triple => {
-                    if event.local_name().as_ref() == b"subject" {
+                    if event.local_name().into_inner() == "subject" {
                         self.state_stack.push(State::Subject);
                         Ok(None)
-                    } else if event.local_name().as_ref() == b"predicate" {
+                    } else if event.local_name().into_inner() == "predicate" {
                         self.state_stack.push(State::Predicate);
                         Ok(None)
-                    } else if event.local_name().as_ref() == b"object" {
+                    } else if event.local_name().into_inner() == "object" {
                         self.state_stack.push(State::Object);
                         Ok(None)
                     } else {
                         Err(QueryResultsSyntaxError::msg(format!(
                             "Expecting <subject>, <predicate> or <object> found <{}>",
-                            self.decoder.decode(event.name().as_ref())?
+                            event.name().into_inner()
                         ))
                         .into())
                     }
                 }
                 State::Uri => Err(QueryResultsSyntaxError::msg(format!(
                     "<uri> must only contain a string, found <{}>",
-                    self.decoder.decode(event.name().as_ref())?
+                    event.name().into_inner()
                 ))
                 .into()),
                 State::BNode => Err(QueryResultsSyntaxError::msg(format!(
                     "<bnode> must only contain a string, found <{}>",
-                    self.decoder.decode(event.name().as_ref())?
+                    event.name().into_inner()
                 ))
                 .into()),
                 State::Literal => Err(QueryResultsSyntaxError::msg(format!(
                     "<literal> must only contain a string, found <{}>",
-                    self.decoder.decode(event.name().as_ref())?
+                    event.name().into_inner()
                 ))
                 .into()),
             },
             Event::Text(event) => {
                 self.text_buffer
-                    .push_str(&event.xml_content(self.xml_version)?);
+                    .push_str(&event.xml_content(self.xml_version));
                 Ok(None)
             }
             Event::End(_) => {
@@ -1056,7 +1044,7 @@ fn decode_xml_entity(
         buffer.push(char_ref);
         return Ok(());
     }
-    let reference = event.xml_content(xml_version)?;
+    let reference = event.xml_content(xml_version);
     let Some(value) = resolve_xml_entity(&reference) else {
         return Err(EscapeError::UnrecognizedEntity(0..event.len(), reference.into()).into());
     };
