@@ -37,8 +37,6 @@ fn sparql10_w3c_query_evaluation_testsuite() -> Result<()> {
             // Our scoping of variables introduced by GRAPH is wrong
             "http://www.w3.org/2001/sw/DataAccess/tests/data-r2/graph/manifest#graph-variable-scope",
             "http://www.w3.org/2001/sw/DataAccess/tests/data-r2/graph/manifest#graph-optional",
-            // mark-ik/0.5: case-insensitive boolean keywords, fixed upstream on the new parser (c29be036)
-            "http://www.w3.org/2001/sw/DataAccess/tests/data-r2/expr-builtin/manifest#case-insensitive-booleans",
         ],
     )
 }
