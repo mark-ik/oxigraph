@@ -34,6 +34,7 @@ by hand where it conflicted with the 0.5 line.
 | 26d0720c | c29be036 (re-expressed) | Boolean keywords match case-insensitively (2 lines on the 0.5 peg parser). |
 | 66177af1 | 3a80a8b9 (in part) | The testsuite stops enabling `standard-unicode-escaping`; the 0.5 parser already treats escapes as SPARQL 1.2 says. spargebra keeps the feature, so its features stay those of 0.4.8. |
 | cd71d9d7 | c0f77340 (re-expressed) | A SELECT expression binds its variable for the following ones (1 line). |
+| e1526eb2 | none | md-5, sha1 and sha2 at 0.11 only; upstream's >=0.10,<0.12 ranges let a graph holding sha2 0.10 split spareval's digests across majors, which does not compile. |
 
 ## Re-expressed fixes
 
