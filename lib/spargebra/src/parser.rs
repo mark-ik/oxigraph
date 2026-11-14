@@ -697,6 +697,8 @@ fn build_select(
                 if pv.contains(&v) {
                     return Err("Duplicated variable name in SELECT");
                 }
+                // A SELECT expression binds its variable for the following ones (SPARQL 1.2, 11.4)
+                visible.insert(v.clone());
                 pv.push(v)
             }
             true
