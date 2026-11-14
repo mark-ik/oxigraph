@@ -113,11 +113,6 @@ fn sparql12_w3c_testsuite() -> Result<()> {
             "https://w3c.github.io/rdf-tests/sparql/sparql12/syntax-triple-terms-negative/manifest#tripleterm-subject-06",
             // We do not prevent nested aggregate functions
             "https://w3c.github.io/rdf-tests/sparql/sparql12/syntax/manifest#nested-aggregate-functions",
-            // mark-ik/0.5: SPARQL 1.2 codepoint escapes, fixed upstream on the new parser (3a80a8b9)
-            "https://w3c.github.io/rdf-tests/sparql/sparql12/codepoint-escapes/manifest#codepoint-esc-01-bad",
-            "https://w3c.github.io/rdf-tests/sparql/sparql12/codepoint-escapes/manifest#codepoint-esc-03-bad",
-            "https://w3c.github.io/rdf-tests/sparql/sparql12/codepoint-escapes/manifest#codepoint-esc-08",
-            "https://w3c.github.io/rdf-tests/sparql/sparql12/codepoint-escapes/manifest#codepoint-esc-09",
             // mark-ik/0.5: a SELECT expression reusing an earlier alias, fixed upstream on the new parser (c0f77340)
             "https://w3c.github.io/rdf-tests/sparql/sparql12/grouping/manifest#select-variable-reuse",
         ],
