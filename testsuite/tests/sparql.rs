@@ -37,6 +37,8 @@ fn sparql10_w3c_query_evaluation_testsuite() -> Result<()> {
             // Our scoping of variables introduced by GRAPH is wrong
             "http://www.w3.org/2001/sw/DataAccess/tests/data-r2/graph/manifest#graph-variable-scope",
             "http://www.w3.org/2001/sw/DataAccess/tests/data-r2/graph/manifest#graph-optional",
+            // mark-ik/0.5: case-insensitive boolean keywords, fixed upstream on the new parser (c29be036)
+            "http://www.w3.org/2001/sw/DataAccess/tests/data-r2/expr-builtin/manifest#case-insensitive-booleans",
         ],
     )
 }
@@ -113,6 +115,13 @@ fn sparql12_w3c_testsuite() -> Result<()> {
             "https://w3c.github.io/rdf-tests/sparql/sparql12/syntax-triple-terms-negative/manifest#tripleterm-subject-06",
             // We do not prevent nested aggregate functions
             "https://w3c.github.io/rdf-tests/sparql/sparql12/syntax/manifest#nested-aggregate-functions",
+            // mark-ik/0.5: SPARQL 1.2 codepoint escapes, fixed upstream on the new parser (3a80a8b9)
+            "https://w3c.github.io/rdf-tests/sparql/sparql12/codepoint-escapes/manifest#codepoint-esc-01-bad",
+            "https://w3c.github.io/rdf-tests/sparql/sparql12/codepoint-escapes/manifest#codepoint-esc-03-bad",
+            "https://w3c.github.io/rdf-tests/sparql/sparql12/codepoint-escapes/manifest#codepoint-esc-08",
+            "https://w3c.github.io/rdf-tests/sparql/sparql12/codepoint-escapes/manifest#codepoint-esc-09",
+            // mark-ik/0.5: a SELECT expression reusing an earlier alias, fixed upstream on the new parser (c0f77340)
+            "https://w3c.github.io/rdf-tests/sparql/sparql12/grouping/manifest#select-variable-reuse",
         ],
     )
 }
