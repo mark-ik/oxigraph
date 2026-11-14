@@ -30,16 +30,17 @@ by hand where it conflicted with the 0.5 line.
 | ffd2b3c0 | 79554fa05 | The JSON-LD testsuite un-ignores (the code is in 9776968c). |
 | 8dad126f | none | Lock update for the moves above. |
 | c4575594 | d4c8140b9 | The `testsuite/rdf-tests` submodule half of the RDF/XML fix (to `3d0b0613d`). |
-| f33a89c4 | none | Ignores six SPARQL tests the newer rdf-tests adds and the 0.5 parser fails; see below. |
+| f33a89c4 | none | Ignored six SPARQL tests the newer rdf-tests adds; the three commits below un-ignore them. |
+| 26d0720c | c29be036 (re-expressed) | Boolean keywords match case-insensitively (2 lines on the 0.5 peg parser). |
+| 66177af1 | 3a80a8b9 (in part) | The testsuite stops enabling `standard-unicode-escaping`; the 0.5 parser already treats escapes as SPARQL 1.2 says. spargebra keeps the feature, so its features stay those of 0.4.8. |
+| cd71d9d7 | c0f77340 (re-expressed) | A SELECT expression binds its variable for the following ones (1 line). |
 
-## Known gaps
+## Re-expressed fixes
 
-The rdf-tests move fails six SPARQL tests that upstream fixes only on main's
-rewritten (Chumsky) parser, so the fixes do not cherry-pick onto 0.5. They are in
-`testsuite/tests/sparql.rs`'s ignore lists, each naming its upstream fix:
-`case-insensitive-booleans` (c29be036), `codepoint-esc-01-bad`, `-03-bad`, `-08`
-and `-09` (3a80a8b9), and `select-variable-reuse` (c0f77340). Porting them to the
-0.5 parser is being sized (D160).
+Upstream fixed the three SPARQL commits above only on main's rewritten (Chumsky)
+parser, so they do not cherry-pick onto 0.5; the fork carries small equivalents
+(engine-split D160, D162). At 0.6 they drop: upstream's own fixes replace them.
+With them the fork's testsuite runs with no ignores of the family's.
 
 ## Moving the fork
 
