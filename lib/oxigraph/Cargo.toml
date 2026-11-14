@@ -51,7 +51,7 @@ oxrocksdb-sys = { workspace = true, optional = true }
 [target.'cfg(all(target_family = "wasm", target_os = "unknown"))'.dependencies]
 getrandom.workspace = true
 js-sys = { workspace = true, optional = true }
-rand = "0.9"
+rand = "0.10"
 
 [dev-dependencies]
 serde_json.workspace = true
